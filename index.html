@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Robot Simulation Sandbox</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Robot Simulation Sandbox</h1>
+      <div class="workspace">
+        <section class="panel editor-panel">
+          <h2>Code Editor</h2>
+          <textarea id="codeEditor" aria-label="Code editor">// Click Run to move the robot forward.
+moveForward();</textarea>
+          <div class="button-row">
+            <button id="runButton" type="button">Run</button>
+            <button id="resetButton" type="button">Reset</button>
+          </div>
+        </section>
+
+        <section class="panel simulation-panel">
+          <h2>Simulation</h2>
+          <canvas id="simulationCanvas" width="500" height="400" aria-label="Robot simulation canvas"></canvas>
+        </section>
+      </div>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
