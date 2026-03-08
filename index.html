@@ -12,10 +12,21 @@
       <div class="workspace">
         <section class="panel editor-panel">
           <h2>Code Editor</h2>
-          <p class="hint">Supported commands: <code>moveForward(30)</code>, <code>moveBackward(20)</code>, <code>turnRight(90)</code>, <code>turnLeft(45)</code>.</p>
-          <textarea id="codeEditor" aria-label="Code editor">moveForward(30)
-turnRight(90)
-moveForward(40)</textarea>
+          <p class="hint">
+            FTC-style motor control. Power between -1 and 1; negative = backwards.
+            <code>leftMotor.setPower(power)</code>,
+            <code>rightMotor.setPower(power)</code>,
+            <code>sleep(milliseconds)</code>,
+            <code>intake()</code>,
+            <code>shoot(220)</code>.
+          </p>
+          <textarea id="codeEditor" aria-label="Code editor">leftMotor.setPower(0.5);
+rightMotor.setPower(0.5);
+sleep(1000);
+leftMotor.setPower(0);
+rightMotor.setPower(0);
+intake();
+shoot(220);</textarea>
           <div class="button-row">
             <button id="runButton" type="button">Run</button>
             <button id="resetButton" type="button">Reset</button>
@@ -25,7 +36,22 @@ moveForward(40)</textarea>
 
         <section class="panel simulation-panel">
           <h2>Simulation</h2>
-          <canvas id="simulationCanvas" width="500" height="400" aria-label="Robot simulation canvas"></canvas>
+          <div class="hud" aria-label="Robot status heads-up display">
+            <div class="hud-item">
+              <span class="hud-label">Score</span>
+              <span id="scoreValue" class="hud-value">0</span>
+            </div>
+            <div class="hud-item">
+              <span class="hud-label">Held balls</span>
+              <span id="heldValue" class="hud-value">0</span>
+            </div>
+          </div>
+          <canvas
+            id="simulationCanvas"
+            width="500"
+            height="400"
+            aria-label="Robot simulation canvas"
+          ></canvas>
         </section>
       </div>
     </main>

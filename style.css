@@ -43,6 +43,28 @@ h1 {
   flex: 1;
 }
 
+.hud {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  align-items: baseline;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+
+.hud-item {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.hud-label {
+  font-weight: 600;
+}
+
+.hud-value {
+  font-variant-numeric: tabular-nums;
+}
+
 .hint {
   margin: 0 0 0.75rem;
   font-size: 0.9rem;

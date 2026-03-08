@@ -10,6 +10,8 @@ const heldValue = document.getElementById('heldValue');
 const ROBOT_SIZE = 24;
 const ROBOT_RADIUS = ROBOT_SIZE / 2;
 const MOVE_SPEED_PX_PER_SECOND = 180;
+const MOTOR_STEP_DURATION_SECONDS = 0.4;
+const MOTOR_TRACK_WIDTH_PX = ROBOT_SIZE * 2;
 const FIELD_MARGIN = 20;
 const FIELD_TILES_PER_SIDE = 6;
 const BALL_RADIUS = 7;
@@ -22,6 +24,8 @@ const SHOOT_POWER_MAX = 500;
 
 let isRunning = false;
 let score = 0;
+let leftMotorPower = 0;
+let rightMotorPower = 0;
 
 const basketTargets = [
   { x: 0.15, y: 0.18, alliance: 'red', radius: 14 },
@@ -359,18 +363,9 @@ function shootBall(power = 220) {
   statusMessage.textContent = `Shot ball at power ${Math.round(clampedPower)}.`;
 }
 
-function animateMove(distance = 20) {
+function simulateMotorStep(durationSeconds = MOTOR_STEP_DURATION_SECONDS) {
   return new Promise((resolve) => {
-    if (distance === 0) {
-      resolve();
-      return;
-    }
-
-    const directionX = Math.cos(robot.angle);
-    const directionY = Math.sin(robot.angle);
-    const direction = Math.sign(distance);
-    const totalDistance = Math.abs(distance);
-    let movedDistance = 0;
+    let elapsed = 0;
     let lastTimestamp;
 
     function step(timestamp) {
@@ -378,20 +373,29 @@ function animateMove(distance = 20) {
         lastTimestamp = timestamp;
       }
 
-      const deltaSeconds = (timestamp - lastTimestamp) / 1000;
+      const deltaSeconds = Math.min((timestamp - lastTimestamp) / 1000, 0.05);
       lastTimestamp = timestamp;
-      const robotStep = Math.min(MOVE_SPEED_PX_PER_SECOND * deltaSeconds, totalDistance - movedDistance);
+      elapsed += deltaSeconds;
 
-      movedDistance += robotStep;
-      const robotVx = directionX * MOVE_SPEED_PX_PER_SECOND * direction;
-      const robotVy = directionY * MOVE_SPEED_PX_PER_SECOND * direction;
+      const vLeft = leftMotorPower * MOVE_SPEED_PX_PER_SECOND;
+      const vRight = rightMotorPower * MOVE_SPEED_PX_PER_SECOND;
+      const linearVelocity = (vLeft + vRight) / 2;
+      const angularVelocity = MOTOR_TRACK_WIDTH_PX === 0 ? 0 : (vRight - vLeft) / MOTOR_TRACK_WIDTH_PX;
 
-      robot.x += directionX * robotStep * direction;
-      robot.y += directionY * robotStep * direction;
+      const previousX = robot.x;
+      const previousY = robot.y;
+
+      robot.angle = normalizeAngle(robot.angle + angularVelocity * deltaSeconds);
+      robot.x += Math.cos(robot.angle) * linearVelocity * deltaSeconds;
+      robot.y += Math.sin(robot.angle) * linearVelocity * deltaSeconds;
+
+      const robotVx = (robot.x - previousX) / deltaSeconds;
+      const robotVy = (robot.y - previousY) / deltaSeconds;
+
       keepRobotInBounds();
       resolveRobotBallContacts(robotVx, robotVy);
 
-      if (movedDistance >= totalDistance) {
+      if (elapsed >= durationSeconds) {
         resolve();
       } else {
         requestAnimationFrame(step);
@@ -400,24 +404,6 @@ function animateMove(distance = 20) {
 
     requestAnimationFrame(step);
   });
-}
-
-function moveForward(distance = 20) {
-  return animateMove(distance);
-}
-
-function moveBackward(distance = 20) {
-  return animateMove(-distance);
-}
-
-function turnRight(degrees = 90) {
-  const radians = (degrees * Math.PI) / 180;
-  robot.angle = normalizeAngle(robot.angle + radians);
-}
-
-function turnLeft(degrees = 90) {
-  const radians = (degrees * Math.PI) / 180;
-  robot.angle = normalizeAngle(robot.angle - radians);
 }
 
 async function runSimulation() {
@@ -430,7 +416,10 @@ async function runSimulation() {
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith('//'));
 
-  const commandPattern = /^(moveForward|moveBackward|turnRight|turnLeft|intake|shoot)\(([-+]?\d*\.?\d+)?\);?$/;
+  const setPowerPattern = /^(leftMotor|rightMotor)\.setPower\((-?\d*\.?\d+)\);?$/;
+  const sleepPattern = /^sleep\((-?\d*\.?\d+)\);?$/;
+  const intakePattern = /^intake\(\);?$/;
+  const shootPattern = /^shoot\((-?\d*\.?\d+)?\);?$/;
 
   isRunning = true;
   runButton.disabled = true;
@@ -439,34 +428,50 @@ async function runSimulation() {
   try {
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i];
-      const match = line.match(commandPattern);
+      const setPowerMatch = line.match(setPowerPattern);
+      const sleepMatch = line.match(sleepPattern);
+      const intakeMatch = line.match(intakePattern);
+      const shootMatch = line.match(shootPattern);
 
-      if (!match) {
+      if (setPowerMatch) {
+        const motor = setPowerMatch[1];
+        const power = Number(setPowerMatch[2]);
+
+        if (Number.isNaN(power)) {
+          statusMessage.textContent = `Error on line ${i + 1}: invalid power in "${line}"`;
+          return;
+        }
+
+        const clampedPower = Math.max(-1, Math.min(1, power));
+        if (motor === 'leftMotor') {
+          leftMotorPower = clampedPower;
+        } else {
+          rightMotorPower = clampedPower;
+        }
+        // Motor power is updated immediately; motion happens during sleep() commands.
+      } else if (sleepMatch) {
+        const msValue = Number(sleepMatch[1]);
+        if (Number.isNaN(msValue) || msValue < 0) {
+          statusMessage.textContent = `Error on line ${i + 1}: invalid sleep duration in "${line}"`;
+          return;
+        }
+        const seconds = msValue / 1000;
+        if (seconds > 0) {
+          await simulateMotorStep(seconds);
+        }
+      } else if (intakeMatch) {
+        intakeBalls();
+      } else if (shootMatch) {
+        const rawValue = shootMatch[1];
+        const value = rawValue === undefined ? 220 : Number(rawValue);
+        if (Number.isNaN(value)) {
+          statusMessage.textContent = `Error on line ${i + 1}: invalid power in "${line}"`;
+          return;
+        }
+        shootBall(value);
+      } else {
         statusMessage.textContent = `Error on line ${i + 1}: unsupported command "${line}"`;
         return;
-      }
-
-      const command = match[1];
-      const rawValue = match[2];
-      const value = rawValue === undefined ? undefined : Number(rawValue);
-
-      if (value !== undefined && Number.isNaN(value)) {
-        statusMessage.textContent = `Error on line ${i + 1}: invalid number in "${line}"`;
-        return;
-      }
-
-      if (command === 'moveForward') {
-        await moveForward(value ?? 20);
-      } else if (command === 'moveBackward') {
-        await moveBackward(value ?? 20);
-      } else if (command === 'turnRight') {
-        turnRight(value ?? 90);
-      } else if (command === 'turnLeft') {
-        turnLeft(value ?? 90);
-      } else if (command === 'intake') {
-        intakeBalls();
-      } else if (command === 'shoot') {
-        shootBall(value ?? 220);
       }
     }
 
@@ -485,6 +490,8 @@ function resetRobot() {
   robot.x = fieldRect.x + fieldRect.size / 2;
   robot.y = fieldRect.y + fieldRect.size / 2;
   robot.angle = 0;
+  leftMotorPower = 0;
+  rightMotorPower = 0;
   score = 0;
   initializeBalls();
   updateHud();
@@ -512,5 +519,5 @@ window.addEventListener('load', () => {
   initializeBalls();
   updateHud();
   requestAnimationFrame(simulationFrame);
-  statusMessage.textContent = 'FTC-style board initialized. Use intake() and shoot(power).';
+  statusMessage.textContent = 'FTC-style board initialized. Use leftMotor.setPower(power), rightMotor.setPower(power), intake(), shoot(power).';
 });
