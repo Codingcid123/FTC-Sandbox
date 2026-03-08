@@ -7,12 +7,48 @@ const resetButton = document.getElementById('resetButton');
 
 const ROBOT_SIZE = 24;
 const MOVE_SPEED_PX_PER_SECOND = 180;
+const FIELD_MARGIN = 20;
+const FIELD_TILES_PER_SIDE = 6;
+const BALL_RADIUS = 7;
 
 let isRunning = false;
 
+const basketTargets = [
+  { x: 0.15, y: 0.18, alliance: 'red' },
+  { x: 0.15, y: 0.82, alliance: 'red' },
+  { x: 0.85, y: 0.18, alliance: 'blue' },
+  { x: 0.85, y: 0.82, alliance: 'blue' },
+];
+
+const fieldBalls = [
+  { x: 0.25, y: 0.3 },
+  { x: 0.25, y: 0.5 },
+  { x: 0.25, y: 0.7 },
+  { x: 0.38, y: 0.22 },
+  { x: 0.38, y: 0.78 },
+  { x: 0.5, y: 0.35 },
+  { x: 0.5, y: 0.65 },
+  { x: 0.62, y: 0.22 },
+  { x: 0.62, y: 0.78 },
+  { x: 0.75, y: 0.3 },
+  { x: 0.75, y: 0.5 },
+  { x: 0.75, y: 0.7 },
+];
+
+function getFieldRect() {
+  const size = Math.min(canvas.width, canvas.height) - FIELD_MARGIN * 2;
+  return {
+    x: (canvas.width - size) / 2,
+    y: (canvas.height - size) / 2,
+    size,
+  };
+}
+
+const fieldRect = getFieldRect();
+
 const robot = {
-  x: canvas.width / 2,
-  y: canvas.height / 2,
+  x: fieldRect.x + fieldRect.size / 2,
+  y: fieldRect.y + fieldRect.size / 2,
   angle: 0,
 };
 
@@ -20,8 +56,84 @@ function normalizeAngle(angle) {
   return (angle + Math.PI * 2) % (Math.PI * 2);
 }
 
-function drawRobot() {
+function toFieldPoint(point) {
+  return {
+    x: fieldRect.x + point.x * fieldRect.size,
+    y: fieldRect.y + point.y * fieldRect.size,
+  };
+}
+
+function drawField() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(fieldRect.x, fieldRect.y, fieldRect.size, fieldRect.size);
+
+  ctx.fillStyle = 'rgba(220, 38, 38, 0.18)';
+  ctx.fillRect(fieldRect.x, fieldRect.y, fieldRect.size / 2, fieldRect.size);
+
+  ctx.fillStyle = 'rgba(37, 99, 235, 0.18)';
+  ctx.fillRect(fieldRect.x + fieldRect.size / 2, fieldRect.y, fieldRect.size / 2, fieldRect.size);
+
+  const tileSize = fieldRect.size / FIELD_TILES_PER_SIDE;
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.5)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= FIELD_TILES_PER_SIDE; i += 1) {
+    const offset = i * tileSize;
+    ctx.beginPath();
+    ctx.moveTo(fieldRect.x + offset, fieldRect.y);
+    ctx.lineTo(fieldRect.x + offset, fieldRect.y + fieldRect.size);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(fieldRect.x, fieldRect.y + offset);
+    ctx.lineTo(fieldRect.x + fieldRect.size, fieldRect.y + offset);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = '#e2e8f0';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(fieldRect.x, fieldRect.y, fieldRect.size, fieldRect.size);
+
+  ctx.strokeStyle = '#f8fafc';
+  ctx.setLineDash([8, 6]);
+  ctx.beginPath();
+  ctx.moveTo(fieldRect.x + fieldRect.size / 2, fieldRect.y);
+  ctx.lineTo(fieldRect.x + fieldRect.size / 2, fieldRect.y + fieldRect.size);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  basketTargets.forEach((basket) => {
+    const position = toFieldPoint(basket);
+    const fill = basket.alliance === 'red' ? '#dc2626' : '#2563eb';
+
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.arc(position.x, position.y, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#f8fafc';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(position.x, position.y, 9, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+
+  fieldBalls.forEach((ball) => {
+    const position = toFieldPoint(ball);
+    ctx.fillStyle = '#f59e0b';
+    ctx.beginPath();
+    ctx.arc(position.x, position.y, BALL_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#78350f';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  });
+}
+
+function drawRobot() {
+  drawField();
 
   ctx.save();
   ctx.translate(robot.x, robot.y);
@@ -49,8 +161,8 @@ function drawRobot() {
 
 function keepRobotInBounds() {
   const radius = ROBOT_SIZE / 2;
-  robot.x = Math.max(radius, Math.min(canvas.width - radius, robot.x));
-  robot.y = Math.max(radius, Math.min(canvas.height - radius, robot.y));
+  robot.x = Math.max(fieldRect.x + radius, Math.min(fieldRect.x + fieldRect.size - radius, robot.x));
+  robot.y = Math.max(fieldRect.y + radius, Math.min(fieldRect.y + fieldRect.size - radius, robot.y));
 }
 
 function animateMove(distance = 20) {
@@ -178,10 +290,10 @@ function resetRobot() {
     return;
   }
 
-  robot.x = canvas.width / 2;
-  robot.y = canvas.height / 2;
+  robot.x = fieldRect.x + fieldRect.size / 2;
+  robot.y = fieldRect.y + fieldRect.size / 2;
   robot.angle = 0;
-  statusMessage.textContent = 'Robot reset to center.';
+  statusMessage.textContent = 'Robot reset to center of the FTC-style field.';
   drawRobot();
 }
 
@@ -190,5 +302,5 @@ resetButton.addEventListener('click', resetRobot);
 
 window.addEventListener('load', () => {
   drawRobot();
-  statusMessage.textContent = 'Robot initialized at center.';
+  statusMessage.textContent = 'FTC-style board initialized. Red and Blue alliances loaded.';
 });
