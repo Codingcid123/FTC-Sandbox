@@ -4,23 +4,33 @@ const codeEditor = document.getElementById('codeEditor');
 const statusMessage = document.getElementById('statusMessage');
 const runButton = document.getElementById('runButton');
 const resetButton = document.getElementById('resetButton');
+const scoreValue = document.getElementById('scoreValue');
+const heldValue = document.getElementById('heldValue');
 
 const ROBOT_SIZE = 24;
+const ROBOT_RADIUS = ROBOT_SIZE / 2;
 const MOVE_SPEED_PX_PER_SECOND = 180;
 const FIELD_MARGIN = 20;
 const FIELD_TILES_PER_SIDE = 6;
 const BALL_RADIUS = 7;
+const BALL_DRAG_PER_SECOND = 0.25;
+const BOUNCE_FACTOR = 0.7;
+const INTAKE_RADIUS = 26;
+const MAX_HELD_BALLS = 2;
+const SHOOT_POWER_MIN = 80;
+const SHOOT_POWER_MAX = 500;
 
 let isRunning = false;
+let score = 0;
 
 const basketTargets = [
-  { x: 0.15, y: 0.18, alliance: 'red' },
-  { x: 0.15, y: 0.82, alliance: 'red' },
-  { x: 0.85, y: 0.18, alliance: 'blue' },
-  { x: 0.85, y: 0.82, alliance: 'blue' },
+  { x: 0.15, y: 0.18, alliance: 'red', radius: 14 },
+  { x: 0.15, y: 0.82, alliance: 'red', radius: 14 },
+  { x: 0.85, y: 0.18, alliance: 'blue', radius: 14 },
+  { x: 0.85, y: 0.82, alliance: 'blue', radius: 14 },
 ];
 
-const fieldBalls = [
+const fieldBallStarts = [
   { x: 0.25, y: 0.3 },
   { x: 0.25, y: 0.5 },
   { x: 0.25, y: 0.7 },
@@ -45,12 +55,13 @@ function getFieldRect() {
 }
 
 const fieldRect = getFieldRect();
-
 const robot = {
   x: fieldRect.x + fieldRect.size / 2,
   y: fieldRect.y + fieldRect.size / 2,
   angle: 0,
 };
+
+let balls = [];
 
 function normalizeAngle(angle) {
   return (angle + Math.PI * 2) % (Math.PI * 2);
@@ -61,6 +72,30 @@ function toFieldPoint(point) {
     x: fieldRect.x + point.x * fieldRect.size,
     y: fieldRect.y + point.y * fieldRect.size,
   };
+}
+
+function initializeBalls() {
+  balls = fieldBallStarts.map((start, index) => {
+    const point = toFieldPoint(start);
+    return {
+      id: index,
+      x: point.x,
+      y: point.y,
+      vx: 0,
+      vy: 0,
+      held: false,
+      scored: false,
+    };
+  });
+}
+
+function getHeldCount() {
+  return balls.filter((ball) => ball.held && !ball.scored).length;
+}
+
+function updateHud() {
+  scoreValue.textContent = String(score);
+  heldValue.textContent = String(getHeldCount());
 }
 
 function drawField() {
@@ -109,21 +144,26 @@ function drawField() {
 
     ctx.fillStyle = fill;
     ctx.beginPath();
-    ctx.arc(position.x, position.y, 15, 0, Math.PI * 2);
+    ctx.arc(position.x, position.y, basket.radius + 1, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.strokeStyle = '#f8fafc';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(position.x, position.y, 9, 0, Math.PI * 2);
+    ctx.arc(position.x, position.y, basket.radius - 4, 0, Math.PI * 2);
     ctx.stroke();
   });
+}
 
-  fieldBalls.forEach((ball) => {
-    const position = toFieldPoint(ball);
+function drawBalls() {
+  balls.forEach((ball) => {
+    if (ball.held || ball.scored) {
+      return;
+    }
+
     ctx.fillStyle = '#f59e0b';
     ctx.beginPath();
-    ctx.arc(position.x, position.y, BALL_RADIUS, 0, Math.PI * 2);
+    ctx.arc(ball.x, ball.y, BALL_RADIUS, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.strokeStyle = '#78350f';
@@ -133,8 +173,6 @@ function drawField() {
 }
 
 function drawRobot() {
-  drawField();
-
   ctx.save();
   ctx.translate(robot.x, robot.y);
   ctx.rotate(robot.angle);
@@ -156,19 +194,174 @@ function drawRobot() {
   ctx.lineTo(ROBOT_SIZE / 2 + 12, 0);
   ctx.stroke();
 
+  const heldCount = getHeldCount();
+  for (let i = 0; i < heldCount; i += 1) {
+    ctx.fillStyle = '#f59e0b';
+    ctx.beginPath();
+    ctx.arc(-6 + i * 10, -ROBOT_SIZE / 2 - 6, BALL_RADIUS - 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   ctx.restore();
 }
 
+function render() {
+  drawField();
+  drawBalls();
+  drawRobot();
+}
+
 function keepRobotInBounds() {
-  const radius = ROBOT_SIZE / 2;
-  robot.x = Math.max(fieldRect.x + radius, Math.min(fieldRect.x + fieldRect.size - radius, robot.x));
-  robot.y = Math.max(fieldRect.y + radius, Math.min(fieldRect.y + fieldRect.size - radius, robot.y));
+  robot.x = Math.max(fieldRect.x + ROBOT_RADIUS, Math.min(fieldRect.x + fieldRect.size - ROBOT_RADIUS, robot.x));
+  robot.y = Math.max(fieldRect.y + ROBOT_RADIUS, Math.min(fieldRect.y + fieldRect.size - ROBOT_RADIUS, robot.y));
+}
+
+function resolveRobotBallContacts(robotVx, robotVy) {
+  balls.forEach((ball) => {
+    if (ball.held || ball.scored) {
+      return;
+    }
+
+    const dx = ball.x - robot.x;
+    const dy = ball.y - robot.y;
+    const distance = Math.hypot(dx, dy);
+    const minDistance = ROBOT_RADIUS + BALL_RADIUS;
+
+    if (distance < minDistance) {
+      const nx = distance === 0 ? Math.cos(robot.angle) : dx / distance;
+      const ny = distance === 0 ? Math.sin(robot.angle) : dy / distance;
+      const overlap = minDistance - distance;
+
+      robot.x -= nx * overlap * 0.5;
+      robot.y -= ny * overlap * 0.5;
+      keepRobotInBounds();
+
+      ball.x += nx * overlap * 0.5;
+      ball.y += ny * overlap * 0.5;
+
+      ball.vx += robotVx * 0.22;
+      ball.vy += robotVy * 0.22;
+    }
+  });
+}
+
+function keepBallInBounds(ball) {
+  const minX = fieldRect.x + BALL_RADIUS;
+  const maxX = fieldRect.x + fieldRect.size - BALL_RADIUS;
+  const minY = fieldRect.y + BALL_RADIUS;
+  const maxY = fieldRect.y + fieldRect.size - BALL_RADIUS;
+
+  if (ball.x < minX) {
+    ball.x = minX;
+    ball.vx *= -BOUNCE_FACTOR;
+  } else if (ball.x > maxX) {
+    ball.x = maxX;
+    ball.vx *= -BOUNCE_FACTOR;
+  }
+
+  if (ball.y < minY) {
+    ball.y = minY;
+    ball.vy *= -BOUNCE_FACTOR;
+  } else if (ball.y > maxY) {
+    ball.y = maxY;
+    ball.vy *= -BOUNCE_FACTOR;
+  }
+}
+
+function checkBasketScore(ball) {
+  for (let i = 0; i < basketTargets.length; i += 1) {
+    const basket = basketTargets[i];
+    const target = toFieldPoint(basket);
+    const distance = Math.hypot(target.x - ball.x, target.y - ball.y);
+
+    if (distance <= basket.radius - 3) {
+      ball.scored = true;
+      ball.held = false;
+      ball.vx = 0;
+      ball.vy = 0;
+      score += 1;
+      updateHud();
+      statusMessage.textContent = `Scored! Total score: ${score}`;
+      return;
+    }
+  }
+}
+
+function updateBallPhysics(deltaSeconds) {
+  const drag = Math.pow(BALL_DRAG_PER_SECOND, deltaSeconds);
+
+  balls.forEach((ball) => {
+    if (ball.held || ball.scored) {
+      return;
+    }
+
+    ball.x += ball.vx * deltaSeconds;
+    ball.y += ball.vy * deltaSeconds;
+    ball.vx *= drag;
+    ball.vy *= drag;
+
+    if (Math.hypot(ball.vx, ball.vy) < 4) {
+      ball.vx = 0;
+      ball.vy = 0;
+    }
+
+    keepBallInBounds(ball);
+    checkBasketScore(ball);
+  });
+}
+
+function intakeBalls() {
+  const availableSlots = MAX_HELD_BALLS - getHeldCount();
+  if (availableSlots <= 0) {
+    statusMessage.textContent = `Intake full (${MAX_HELD_BALLS} balls max).`;
+    return;
+  }
+
+  const candidates = balls
+    .filter((ball) => !ball.held && !ball.scored)
+    .map((ball) => ({ ball, distance: Math.hypot(ball.x - robot.x, ball.y - robot.y) }))
+    .filter((entry) => entry.distance <= INTAKE_RADIUS)
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, availableSlots);
+
+  candidates.forEach((entry) => {
+    entry.ball.held = true;
+    entry.ball.vx = 0;
+    entry.ball.vy = 0;
+  });
+
+  if (candidates.length > 0) {
+    statusMessage.textContent = `Intook ${candidates.length} ball${candidates.length === 1 ? '' : 's'}.`;
+  } else {
+    statusMessage.textContent = 'No ball close enough to intake.';
+  }
+
+  updateHud();
+}
+
+function shootBall(power = 220) {
+  const clampedPower = Math.max(SHOOT_POWER_MIN, Math.min(SHOOT_POWER_MAX, power));
+  const heldBall = balls.find((ball) => ball.held && !ball.scored);
+
+  if (!heldBall) {
+    statusMessage.textContent = 'No held balls to shoot.';
+    return;
+  }
+
+  heldBall.held = false;
+  heldBall.x = robot.x + Math.cos(robot.angle) * (ROBOT_RADIUS + BALL_RADIUS + 2);
+  heldBall.y = robot.y + Math.sin(robot.angle) * (ROBOT_RADIUS + BALL_RADIUS + 2);
+  heldBall.vx = Math.cos(robot.angle) * clampedPower;
+  heldBall.vy = Math.sin(robot.angle) * clampedPower;
+
+  keepBallInBounds(heldBall);
+  updateHud();
+  statusMessage.textContent = `Shot ball at power ${Math.round(clampedPower)}.`;
 }
 
 function animateMove(distance = 20) {
   return new Promise((resolve) => {
     if (distance === 0) {
-      drawRobot();
       resolve();
       return;
     }
@@ -187,17 +380,16 @@ function animateMove(distance = 20) {
 
       const deltaSeconds = (timestamp - lastTimestamp) / 1000;
       lastTimestamp = timestamp;
+      const robotStep = Math.min(MOVE_SPEED_PX_PER_SECOND * deltaSeconds, totalDistance - movedDistance);
 
-      const deltaDistance = Math.min(
-        MOVE_SPEED_PX_PER_SECOND * deltaSeconds,
-        totalDistance - movedDistance,
-      );
+      movedDistance += robotStep;
+      const robotVx = directionX * MOVE_SPEED_PX_PER_SECOND * direction;
+      const robotVy = directionY * MOVE_SPEED_PX_PER_SECOND * direction;
 
-      movedDistance += deltaDistance;
-      robot.x += directionX * deltaDistance * direction;
-      robot.y += directionY * deltaDistance * direction;
+      robot.x += directionX * robotStep * direction;
+      robot.y += directionY * robotStep * direction;
       keepRobotInBounds();
-      drawRobot();
+      resolveRobotBallContacts(robotVx, robotVy);
 
       if (movedDistance >= totalDistance) {
         resolve();
@@ -238,7 +430,7 @@ async function runSimulation() {
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith('//'));
 
-  const commandPattern = /^(moveForward|moveBackward|turnRight|turnLeft)\(([-+]?\d*\.?\d+)?\);?$/;
+  const commandPattern = /^(moveForward|moveBackward|turnRight|turnLeft|intake|shoot)\(([-+]?\d*\.?\d+)?\);?$/;
 
   isRunning = true;
   runButton.disabled = true;
@@ -251,7 +443,6 @@ async function runSimulation() {
 
       if (!match) {
         statusMessage.textContent = `Error on line ${i + 1}: unsupported command "${line}"`;
-        drawRobot();
         return;
       }
 
@@ -261,7 +452,6 @@ async function runSimulation() {
 
       if (value !== undefined && Number.isNaN(value)) {
         statusMessage.textContent = `Error on line ${i + 1}: invalid number in "${line}"`;
-        drawRobot();
         return;
       }
 
@@ -271,10 +461,12 @@ async function runSimulation() {
         await moveBackward(value ?? 20);
       } else if (command === 'turnRight') {
         turnRight(value ?? 90);
-        drawRobot();
       } else if (command === 'turnLeft') {
         turnLeft(value ?? 90);
-        drawRobot();
+      } else if (command === 'intake') {
+        intakeBalls();
+      } else if (command === 'shoot') {
+        shootBall(value ?? 220);
       }
     }
 
@@ -293,14 +485,32 @@ function resetRobot() {
   robot.x = fieldRect.x + fieldRect.size / 2;
   robot.y = fieldRect.y + fieldRect.size / 2;
   robot.angle = 0;
-  statusMessage.textContent = 'Robot reset to center of the FTC-style field.';
-  drawRobot();
+  score = 0;
+  initializeBalls();
+  updateHud();
+  statusMessage.textContent = 'Field reset. Score cleared.';
+}
+
+let lastFrameTime;
+function simulationFrame(timestamp) {
+  if (lastFrameTime === undefined) {
+    lastFrameTime = timestamp;
+  }
+
+  const deltaSeconds = Math.min((timestamp - lastFrameTime) / 1000, 0.05);
+  lastFrameTime = timestamp;
+
+  updateBallPhysics(deltaSeconds);
+  render();
+  requestAnimationFrame(simulationFrame);
 }
 
 runButton.addEventListener('click', runSimulation);
 resetButton.addEventListener('click', resetRobot);
 
 window.addEventListener('load', () => {
-  drawRobot();
-  statusMessage.textContent = 'FTC-style board initialized. Red and Blue alliances loaded.';
+  initializeBalls();
+  updateHud();
+  requestAnimationFrame(simulationFrame);
+  statusMessage.textContent = 'FTC-style board initialized. Use intake() and shoot(power).';
 });
