@@ -2,8 +2,13 @@ const canvas = document.getElementById('simulationCanvas');
 const ctx = canvas.getContext('2d');
 const codeEditor = document.getElementById('codeEditor');
 const statusMessage = document.getElementById('statusMessage');
+const runButton = document.getElementById('runButton');
+const resetButton = document.getElementById('resetButton');
 
 const ROBOT_SIZE = 24;
+const MOVE_SPEED_PX_PER_SECOND = 180;
+
+let isRunning = false;
 
 const robot = {
   x: canvas.width / 2,
@@ -48,14 +53,57 @@ function keepRobotInBounds() {
   robot.y = Math.max(radius, Math.min(canvas.height - radius, robot.y));
 }
 
+function animateMove(distance = 20) {
+  return new Promise((resolve) => {
+    if (distance === 0) {
+      drawRobot();
+      resolve();
+      return;
+    }
+
+    const directionX = Math.cos(robot.angle);
+    const directionY = Math.sin(robot.angle);
+    const direction = Math.sign(distance);
+    const totalDistance = Math.abs(distance);
+    let movedDistance = 0;
+    let lastTimestamp;
+
+    function step(timestamp) {
+      if (lastTimestamp === undefined) {
+        lastTimestamp = timestamp;
+      }
+
+      const deltaSeconds = (timestamp - lastTimestamp) / 1000;
+      lastTimestamp = timestamp;
+
+      const deltaDistance = Math.min(
+        MOVE_SPEED_PX_PER_SECOND * deltaSeconds,
+        totalDistance - movedDistance,
+      );
+
+      movedDistance += deltaDistance;
+      robot.x += directionX * deltaDistance * direction;
+      robot.y += directionY * deltaDistance * direction;
+      keepRobotInBounds();
+      drawRobot();
+
+      if (movedDistance >= totalDistance) {
+        resolve();
+      } else {
+        requestAnimationFrame(step);
+      }
+    }
+
+    requestAnimationFrame(step);
+  });
+}
+
 function moveForward(distance = 20) {
-  robot.x += Math.cos(robot.angle) * distance;
-  robot.y += Math.sin(robot.angle) * distance;
-  keepRobotInBounds();
+  return animateMove(distance);
 }
 
 function moveBackward(distance = 20) {
-  moveForward(-distance);
+  return animateMove(-distance);
 }
 
 function turnRight(degrees = 90) {
@@ -68,7 +116,11 @@ function turnLeft(degrees = 90) {
   robot.angle = normalizeAngle(robot.angle - radians);
 }
 
-function runSimulation() {
+async function runSimulation() {
+  if (isRunning) {
+    return;
+  }
+
   const lines = codeEditor.value
     .split('\n')
     .map((line) => line.trim())
@@ -76,42 +128,56 @@ function runSimulation() {
 
   const commandPattern = /^(moveForward|moveBackward|turnRight|turnLeft)\(([-+]?\d*\.?\d+)?\);?$/;
 
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    const match = line.match(commandPattern);
+  isRunning = true;
+  runButton.disabled = true;
+  statusMessage.textContent = 'Running simulation...';
 
-    if (!match) {
-      statusMessage.textContent = `Error on line ${i + 1}: unsupported command "${line}"`;
-      drawRobot();
-      return;
+  try {
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      const match = line.match(commandPattern);
+
+      if (!match) {
+        statusMessage.textContent = `Error on line ${i + 1}: unsupported command "${line}"`;
+        drawRobot();
+        return;
+      }
+
+      const command = match[1];
+      const rawValue = match[2];
+      const value = rawValue === undefined ? undefined : Number(rawValue);
+
+      if (value !== undefined && Number.isNaN(value)) {
+        statusMessage.textContent = `Error on line ${i + 1}: invalid number in "${line}"`;
+        drawRobot();
+        return;
+      }
+
+      if (command === 'moveForward') {
+        await moveForward(value ?? 20);
+      } else if (command === 'moveBackward') {
+        await moveBackward(value ?? 20);
+      } else if (command === 'turnRight') {
+        turnRight(value ?? 90);
+        drawRobot();
+      } else if (command === 'turnLeft') {
+        turnLeft(value ?? 90);
+        drawRobot();
+      }
     }
 
-    const command = match[1];
-    const rawValue = match[2];
-    const value = rawValue === undefined ? undefined : Number(rawValue);
-
-    if (value !== undefined && Number.isNaN(value)) {
-      statusMessage.textContent = `Error on line ${i + 1}: invalid number in "${line}"`;
-      drawRobot();
-      return;
-    }
-
-    if (command === 'moveForward') {
-      moveForward(value ?? 20);
-    } else if (command === 'moveBackward') {
-      moveBackward(value ?? 20);
-    } else if (command === 'turnRight') {
-      turnRight(value ?? 90);
-    } else if (command === 'turnLeft') {
-      turnLeft(value ?? 90);
-    }
+    statusMessage.textContent = `Executed ${lines.length} command${lines.length === 1 ? '' : 's'} successfully.`;
+  } finally {
+    runButton.disabled = false;
+    isRunning = false;
   }
-
-  drawRobot();
-  statusMessage.textContent = `Executed ${lines.length} command${lines.length === 1 ? '' : 's'} successfully.`;
 }
 
 function resetRobot() {
+  if (isRunning) {
+    return;
+  }
+
   robot.x = canvas.width / 2;
   robot.y = canvas.height / 2;
   robot.angle = 0;
@@ -119,8 +185,8 @@ function resetRobot() {
   drawRobot();
 }
 
-document.getElementById('runButton').addEventListener('click', runSimulation);
-document.getElementById('resetButton').addEventListener('click', resetRobot);
+runButton.addEventListener('click', runSimulation);
+resetButton.addEventListener('click', resetRobot);
 
 window.addEventListener('load', () => {
   drawRobot();
