@@ -12,12 +12,15 @@
       <div class="workspace">
         <section class="panel editor-panel">
           <h2>Code Editor</h2>
-          <textarea id="codeEditor" aria-label="Code editor">// Click Run to move the robot forward.
-moveForward();</textarea>
+          <p class="hint">Supported commands: <code>moveForward(30)</code>, <code>moveBackward(20)</code>, <code>turnRight(90)</code>, <code>turnLeft(45)</code>.</p>
+          <textarea id="codeEditor" aria-label="Code editor">moveForward(30)
+turnRight(90)
+moveForward(40)</textarea>
           <div class="button-row">
             <button id="runButton" type="button">Run</button>
             <button id="resetButton" type="button">Reset</button>
           </div>
+          <p id="statusMessage" class="status" aria-live="polite"></p>
         </section>
 
         <section class="panel simulation-panel">
